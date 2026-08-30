@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# 发送亮度通知
+function send_notification() {
+    brightness=$(brightnessctl | grep -oP "\d+%" | cut -d '%' -f 1)
+    dunstify -a "changebrightness" -u low -r 3320 -h int:value:"$brightness" -i "brightness-$1" "Brightness: ${brightness}%" -t 2000
+}
+
+case $1 in
+    up)
+        brightnessctl set +5%
+        send_notification $1
+        ;;
+    down)
+        brightnessctl set 5%-
+        send_notification $1
+        ;;
+esac

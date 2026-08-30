@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# ADB按键控制脚本
+# 用法: adbctrl [power|volume|ai] [+|-]
+
+KEY_POWER=26
+KEY_VOLUME_UP=24
+KEY_VOLUME_DOWN=25
+KEY_AI=219  # KEYCODE_ASSIST
+
+function send_key() {
+    adb shell input keyevent $1
+}
+
+function long_press() {
+    for i in {1..4}; do
+        send_key $1
+        sleep 0.5
+    done
+}
+
+case "$1" in
+    power)
+        key=$KEY_POWER
+        ;;
+    volume)
+        if [ "$2" == "+" ]; then
+            key=$KEY_VOLUME_UP
+        else
+            key=$KEY_VOLUME_DOWN
+        fi
+        ;;
+    ai)
+        key=$KEY_AI
+        ;;
+    *)
+        echo "用法: adbctrl [power|volume|ai] [+|-]"
+        echo "示例:"
+        echo "  adbctrl power      # 单次电源键"
+        echo "  adbctrl volume +   # 音量+长按2秒"
+        exit 1
+        ;;
+esac
+
+if [ "$2" == "+" ]; then
+    long_press $key
+else
+    send_key $key
+fi

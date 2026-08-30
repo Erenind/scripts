@@ -1,0 +1,14 @@
+#!/bin/sh
+
+export XAUTHORITY=/home/kyee/.Xauthority
+export DISPLAY=:0
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/1000/bus"
+
+BATTERY_CHARGING=$1
+BATTERY_LEVEL=`acpi -b | grep -P -o '[0-9]+(?=%)'`
+
+if [ $BATTERY_CHARGING -eq 1 ]; then
+  /usr/bin/notify-send "正在充电" "当前电量${BATTERY_LEVEL}%" -u low -i "battery-charging" -t 4000 -r 3321
+elif [ $BATTERY_CHARGING -eq 0 ]; then
+  /usr/bin/notify-send "退出充电" "当前电量${BATTERY_LEVEL}%" -u low -i "battery" -t 4000 -r 3321
+fi

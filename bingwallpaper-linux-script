@@ -1,0 +1,280 @@
+#!/bin/bash
+
+usage() {
+    echo "用法: bingwallpaper-linux-script [options]"
+    echo "选项:"
+    echo " -h, --help  显示当前帮助信息"
+    echo " -v, --version  显示版本信息"
+    echo " -a, --all 下载最近7天的bing壁纸到~/pictures/bingwallpaper目录下,设置此参数后其他参数失效，可显示壁纸信息。"
+    echo " -c, --country 设置地区,
+                中国:zh-CN, 
+                美国:en-US, 
+                日本:ja-JP, 
+                英国:en-UK, 
+                德国:de-DE, 
+                澳大利亚:en-AU, 
+                新西兰:en-NZ, 
+                加拿大:en-CA"
+    echo " -d, --date 下载具体日期的bing壁纸到~/pictures/bingwallpaper目录下"
+    echo " -r, --resolution 下载指定分辨率的壁纸到~/pictures/bingwallpaper目录下,默认4k"
+    echo " -s, --save 设置自定义保存路径"
+    echo " -i, --info 显示壁纸相关信息"
+    echo " -b, --backend 设置壁纸需要的命令，以\$wallpaper变量接收壁纸路径"
+}
+
+version() {
+    echo "Bing Wallpaper Script version 1.0"
+}
+
+# 默认参数
+RESOLUTION="3840x2160"
+DATE=""
+REGION="zh-CN"
+SAVE_PATH="$HOME/Pictures/bingwallpaper"
+SHOW_DETAIL=false
+DOWNLOAD_ALL=false
+BACKEND_CMD=""
+
+# 解析命令行参数
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -v|--version)
+            version
+            exit 0
+            ;;
+        -a|--all)
+            DOWNLOAD_ALL=true
+            shift
+            ;;
+        -c|--country)
+            if [[ -n "$2" ]]; then
+                REGION="$2"
+                shift 2
+            else
+                echo "错误: --country 参数需要一个地区代码"
+                exit 1
+            fi
+            ;;
+        -d|--date)
+            if [[ -n "$2" ]]; then
+                DATE="$2"
+                shift 2
+            else
+                echo "错误: --date 参数需要一个日期"
+                exit 1
+            fi
+            ;;
+        -r|--resolution)
+            if [[ -n "$2" ]]; then
+                RESOLUTION="$2"
+                shift 2
+            else
+                echo "错误: --resolution 参数需要一个分辨率"
+                exit 1
+            fi
+            ;;
+        -s|--save)
+            if [[ -n "$2" ]]; then
+                SAVE_PATH="$2"
+                shift 2
+            else
+                echo "错误: --save 参数需要一个保存路径"
+                exit 1
+            fi
+            ;;
+        -i|--info)
+            SHOW_DETAIL=true
+            shift
+            ;;
+        -b|--backend)
+            if [[ -n "$2" ]]; then
+                BACKEND_CMD="$2"
+                shift 2
+            else
+                echo "错误: --backend 参数需要一个命令"
+                exit 1
+            fi
+            ;;
+        *)
+            echo "未知参数: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+# 创建保存目录
+mkdir -p "$SAVE_PATH"
+
+# 验证地区代码
+case $REGION in
+    "zh-CN"|"en-US"|"ja-JP"|"en-UK"|"de-DE"|"en-AU"|"en-NZ"|"en-CA")
+        ;;
+    *)
+        echo "错误: 不支持的地区代码 '$REGION'"
+        echo "支持的地区: zh-CN, en-US, ja-JP, en-UK, de-DE, en-AU, en-NZ, en-CA"
+        exit 1
+        ;;
+esac
+
+# 验证分辨率
+case $RESOLUTION in
+    "1920x1080"|"3840x2160")
+        ;;
+    *)
+        echo "错误: 不支持的分辨率 '$RESOLUTION'"
+        echo "支持的分辨率: 1920x1080, 3840x2160"
+        exit 1
+        ;;
+esac
+
+# 验证日期格式（如果提供）
+if [[ -n "$DATE" ]]; then
+    if ! [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        echo "错误: 无效的日期格式 '$DATE'，请使用 YYYY-MM-DD 格式"
+        exit 1
+    fi
+    
+    if ! date -d "$DATE" >/dev/null 2>&1; then
+        echo "错误: 无效的日期 '$DATE'"
+        exit 1
+    fi
+    
+    if [[ $(date -d "$DATE" +%s) -gt $(date +%s) ]]; then
+        echo "错误: 日期不能是未来日期 '$DATE'"
+        exit 1
+    fi
+fi
+
+# 检查必要的工具
+if ! command -v curl &> /dev/null; then
+    echo "错误: curl 工具未安装"
+    exit 1
+fi
+
+if ! command -v jq &> /dev/null; then
+    echo "错误: jq 工具未安装"
+    echo "在Ubuntu/Debian上可以使用: sudo apt install jq"
+    echo "在CentOS/RHEL上可以使用: sudo yum install jq"
+    exit 1
+fi
+
+# 下载壁纸函数
+download_wallpaper() {
+    local idx=$1
+    local date_param=$2
+    
+    # 构建API URL
+    local url="https://www.bing.com/HPImageArchive.aspx?format=js&idx=$idx&n=1&mkt=$REGION"
+    if [[ "$RESOLUTION" == "3840x2160" ]]; then
+        url="${url}&uhd=1"
+    fi
+    
+    # 获取JSON响应
+    local json_response=$(curl -s "$url")
+    if [ $? -ne 0 ]; then
+        echo "错误: 获取Bing API数据失败"
+        return 1
+    fi
+    
+    # 提取壁纸信息
+    local img_url="https://www.bing.com$(echo "$json_response" | jq -r '.images[0].url')"
+    local chinese_description=$(echo "$json_response" | jq -r '.images[0].copyright' 2>/dev/null)
+    local title=$(echo "$json_response" | jq -r '.images[0].title' 2>/dev/null)
+    
+    if [ -z "$chinese_description" ] || [ "$chinese_description" = "null" ]; then
+        echo "错误: 解析Bing API响应失败"
+        return 1
+    fi
+    
+    # 手动修改URL以获取更高分辨率的图片
+    if [[ "$RESOLUTION" == "3840x2160" ]]; then
+        # 替换分辨率参数为4K
+        img_url=$(echo "$img_url" | sed 's/w=1920&h=1080/w=3840&h=2160/')
+    elif [[ "$RESOLUTION" == "1920x1080" ]]; then
+        # 确保是1080p分辨率
+        img_url=$(echo "$img_url" | sed 's/w=1920&h=1080/w=1920&h=1080/')
+    fi
+    
+    # 确定文件名（使用title，保留空格）
+    local filename
+    if [[ -n "$date_param" ]]; then
+        filename="bing_${date_param}_${title}.jpg"
+    else
+        local today=$(date +%Y-%m-%d)
+        filename="bing_${today}_${title}.jpg"
+    fi
+    
+    local filepath="$SAVE_PATH/$filename"
+    
+    # 下载壁纸
+    echo "正在下载: $filename"
+    curl -s -o "$filepath" "$img_url"
+    
+    if [ $? -ne 0 ]; then
+        echo "错误: 下载壁纸失败"
+        return 1
+    fi
+    
+    # 显示详细信息
+    if [ "$SHOW_DETAIL" = true ] || [ "$DOWNLOAD_ALL" = true ]; then
+        echo "壁纸信息:"
+        echo "  描述: $chinese_description"
+        echo "  标题: $title"
+        echo "  日期: ${date_param:-$(date +%Y-%m-%d)}"
+        echo "  分辨率: $RESOLUTION"
+        echo "  保存路径: $filepath"
+        echo
+    fi
+    
+    # 设置壁纸（如果有后端命令）
+    if [[ -n "$BACKEND_CMD" ]]; then
+        echo "执行壁纸设置命令..."
+        wallpaper="$filepath" eval "$BACKEND_CMD"
+        if [ $? -ne 0 ]; then
+            echo "警告: 壁纸设置命令执行失败"
+        else
+            echo "壁纸设置命令执行成功"
+        fi
+    fi
+    
+    return 0
+}
+
+# 处理下载所有壁纸
+if [ "$DOWNLOAD_ALL" = true ]; then
+    echo "正在下载最近7天的Bing壁纸..."
+    echo "保存目录: $SAVE_PATH"
+    echo "地区: $REGION"
+    echo "分辨率: $RESOLUTION"
+    echo
+    
+    for i in {0..6}; do
+        download_date=$(date -d "$i days ago" +%Y-%m-%d)
+        echo "=== 处理日期: $download_date ==="
+        download_wallpaper $i "$download_date"
+        echo
+    done
+    echo "所有壁纸下载完成!"
+    exit 0
+fi
+
+# 处理单个壁纸下载
+if [[ -n "$DATE" ]]; then
+    # 计算日期差异
+    days_diff=$(( ($(date +%s) - $(date -d "$DATE" +%s)) / 86400 ))
+    if [[ $days_diff -gt 7 ]]; then
+        echo "错误: Bing只存档过去7天的壁纸"
+        exit 1
+    fi
+    download_wallpaper $days_diff "$DATE"
+else
+    # 下载今天的壁纸
+    download_wallpaper 0
+fi
+
+echo "壁纸下载完成!"
